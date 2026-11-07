@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>To Do :) Rooms</title>
+<style>
+:root{--bg:#f6f4ee;--card:#fff;--ink:#1d2433;--mute:#6b7385;--line:#e3dfd3;--acc:#2f6fed;--accink:#fff;--ok:#2e9e5b;--bad:#c9372c;--track:#e8e4d8;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171f;--card:#1e2330;--ink:#eceef4;--mute:#98a0b3;--line:#2c3345;--acc:#6b9bff;--accink:#0d1220;--ok:#4cc27f;--bad:#ff7a6e;--track:#2c3345}}
+:root[data-theme="dark"]{--bg:#14171f;--card:#1e2330;--ink:#eceef4;--mute:#98a0b3;--line:#2c3345;--acc:#6b9bff;--accink:#0d1220;--ok:#4cc27f;--bad:#ff7a6e;--track:#2c3345}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:20px 16px 48px}
+h1{font:700 30px/1.1 "Segoe Print","Comic Sans MS",cursive,system-ui;margin:8px 0 4px;text-decoration:underline wavy var(--line);text-underline-offset:8px}
+h2{font-size:17px;margin:24px 0 10px}
+.sub{color:var(--mute);margin:12px 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus{outline:2px solid var(--acc);outline-offset:1px}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px}
+button.p{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
+button.full{width:100%;margin-top:14px}
+button:disabled{opacity:.5;cursor:default}
+.tabs{display:flex;gap:6px;margin-bottom:6px}.tabs button{flex:1}.tabs button.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+.err{color:var(--bad);font-size:14px;min-height:20px;margin-top:8px}
+.row{display:flex;gap:8px;align-items:center}
+.row>input{flex:1}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mute{color:var(--mute);font-size:14px}
+.room{display:block;width:100%;text-align:left;margin-bottom:10px}
+.room b{display:block}
+.bar{height:14px;background:var(--track);border-radius:99px;overflow:hidden;margin:6px 0}
+.bar i{display:block;height:100%;width:0;background:var(--ok);border-radius:99px;transition:width .4s}
+.big .bar{height:20px}
+.chip{display:inline-block;background:var(--bg);border:1px dashed var(--mute);border-radius:8px;padding:3px 9px;font:600 15px ui-monospace,Menlo,monospace;letter-spacing:1px}
+.todo{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.todo:last-child{border:0}
+.todo .t{flex:1;word-break:break-word}
+.todo.done .t{text-decoration:line-through;color:var(--mute)}
+.chk{width:26px;height:26px;padding:0;border-radius:7px;flex:none;line-height:1}
+.todo.done .chk{background:var(--ok);border-color:var(--ok);color:#fff}
+.x{padding:4px 9px;color:var(--bad)}
+.danger{color:var(--bad);border-color:var(--bad)}
+.danger.p{background:var(--bad);color:#fff}
+#del{text-align:center;margin-top:18px}
+#del .row{justify-content:center}
+.empty{color:var(--mute);text-align:center;padding:16px 0}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const app=document.getElementById("app");
+const mem={};
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return mem[k]||null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}},del(k){try{localStorage.removeItem(k)}catch(e){delete mem[k]}}};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let db=null,me=null,unsub=null,mineUnsub=null,room=null,mode="login";
+
+// ---------- helpers ----------
+async function hash(pw,salt){
+  const d=new TextEncoder().encode(salt+":"+pw);
+  const b=await crypto.subtle.digest("SHA-256",d);
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+const rnd=(n,a)=>Array.from(crypto.getRandomValues(new Uint8Array(n)),x=>a[x%a.length]).join("");
+const pct=t=>t.length?Math.round(t.filter(x=>x.done).length/t.length*100):0;
+function progressHTML(t){const d=t.filter(x=>x.done).length;return `<div class="bar"><i style="width:${pct(t)}%"></i></div><div class="mute">${d} of ${t.length} done · ${pct(t)}%</div>`}
+const joinedKey=()=>"joined:"+me;
+const getJoined=()=>{try{return JSON.parse(store.get(joinedKey())||"[]")}catch(e){return[]}};
+
+// ---------- views ----------
+function authView(){
+  const ready=!!db;
+  app.innerHTML=`<h1>To Do :)</h1><p class="sub">Make a room, tick things off, and let friends watch your progress.</p>
+  <div class="card"><div class="tabs"><button data-m="login" class="${mode==="login"?"on":""}">Log in</button><button data-m="signup" class="${mode==="signup"?"on":""}">Sign up</button></div>
+  <label for="u">Username</label><input id="u" autocomplete="username" maxlength="20" placeholder="letters, numbers, _">
+  <label for="p">Password</label><input id="p" type="password" autocomplete="${mode==="login"?"current-password":"new-password"}" placeholder="min 6 characters">
+  ${mode==="signup"?`<label for="p2">Confirm password</label><input id="p2" type="password" autocomplete="new-password">`:""}
+  <div class="err" id="err">${ready?"":"Connecting…"}</div>
+  <button class="p full" id="go" ${ready?"":"disabled"}>${mode==="login"?"Log in":"Create account"}</button></div>`;
+  app.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{mode=b.dataset.m;authView()});
+  $("go").onclick=submitAuth;
+  app.querySelectorAll("input").forEach(i=>i.onkeydown=e=>{if(e.key==="Enter")submitAuth()});
+}
+const $=id=>document.getElementById(id);
+const say=m=>{const e=$("err");if(e)e.textContent=m};
+
+async function submitAuth(){
+  const u=$("u").value.trim().toLowerCase(),p=$("p").value;
+  if(!/^[a-z0-9_]{3,20}$/.test(u))return say("Username: 3–20 letters, numbers or underscores.");
+  if(p.length<6)return say("Password must be at least 6 characters.");
+  $("go").disabled=true;say("");
+  try{
+    const ref=db.doc("accounts/"+u),snap=await ref.get();
+    if(mode==="signup"){
+      if($("p2").value!==p){$("go").disabled=false;return say("Passwords don’t match.")}
+      if(snap.exists){$("go").disabled=false;return say("That username is taken.")}
+      const salt=rnd(16,"abcdef0123456789");
+      await ref.set({username:u,salt,hash:await hash(p,salt)});
+    }else{
+      const d=snap.exists&&snap.data();
+      if(!d||d.hash!==await hash(p,d.salt)){$("go").disabled=false;return say("Wrong username or password.")}
+    }
+    me=u;store.set("session",u);home();
+  }catch(e){$("go").disabled=false;say("Couldn’t reach the server: "+(e.message||e.code||"error"))}
+}
+
+function logout(){cleanup();me=null;room=null;store.del("session");authView()}
+function cleanup(){if(unsub){unsub();unsub=null}if(mineUnsub){mineUnsub();mineUnsub=null}}
+
+function home(){
+  cleanup();room=null;
+  app.innerHTML=`<div class="top"><h1>To Do :)</h1><button id="lo">Log out</button></div>
+  <p class="sub">Hi, <b>${esc(me)}</b> 👋</p>
+  <h2>My rooms</h2><div id="mine"><div class="empty">Loading…</div></div>
+  <div class="card"><label for="rn">New room name</label><div class="row"><input id="rn" maxlength="40" placeholder="e.g. Exam prep"><button class="p" id="mk">Create</button></div><div class="err" id="err1"></div></div>
+  <h2>Join a friend’s room</h2>
+  <div class="card"><label for="ji">Room ID</label><input id="ji" maxlength="6" placeholder="6-character ID" style="text-transform:uppercase">
+  <label for="jn">Room name</label><input id="jn" maxlength="40" placeholder="Exact room name">
+  <div class="err" id="err2"></div><button class="p full" id="jo">Join room</button></div>
+  <div id="joined"></div>`;
+  $("lo").onclick=logout;$("mk").onclick=createRoom;$("jo").onclick=joinRoom;
+  $("rn").onkeydown=e=>{if(e.key==="Enter")createRoom()};
+  mineUnsub=db.collection("rooms").where("owner","==",me).onSnapshot(s=>{
+    const el=$("mine");if(!el)return;
+    el.innerHTML=s.empty?`<div class="empty">No rooms yet — create one below.</div>`:s.docs.map(d=>{const r=d.data();return `<button class="room card" data-id="${esc(d.id)}"><b>${esc(r.name)}</b><span class="mute">ID ${esc(d.id)}</span>${progressHTML(r.todos||[])}</button>`}).join("");
+    el.querySelectorAll(".room").forEach(b=>b.onclick=()=>openRoom(b.dataset.id));
+  },e=>{const el=$("mine");if(el)el.innerHTML=`<div class="empty">Couldn’t load rooms.</div>`});
+  const j=getJoined();
+  if(j.length){$("joined").innerHTML=`<h2>Rooms I joined</h2>`+j.map(r=>`<button class="room card" data-id="${esc(r.id)}"><b>${esc(r.name)}</b><span class="mute">ID ${esc(r.id)}</span></button>`).join("");
+    $("joined").querySelectorAll(".room").forEach(b=>b.onclick=()=>openRoom(b.dataset.id))}
+}
+
+async function createRoom(){
+  const name=$("rn").value.trim(),e=$("err1");
+  if(!name){e.textContent="Give your room a name.";return}
+  $("mk").disabled=true;e.textContent="";
+  try{
+    let id,tries=0;
+    do{id=rnd(6,"ABCDEFGHJKLMNPQRSTUVWXYZ23456789");tries++}while((await db.doc("rooms/"+id).get()).exists&&tries<5);
+    await db.doc("rooms/"+id).set({name,owner:me,todos:[],createdAt:Date.now()});
+    openRoom(id);
+  }catch(x){e.textContent="Couldn’t create room.";$("mk").disabled=false}
+}
+
+async function joinRoom(){
+  const id=$("ji").value.trim().toUpperCase(),name=$("jn").value.trim().toLowerCase(),e=$("err2");
+  if(!id||!name){e.textContent="Enter both the Room ID and Room name.";return}
+  $("jo").disabled=true;e.textContent="";
+  try{
+    const s=await db.doc("rooms/"+id).get(),d=s.exists&&s.data();
+    if(!d||String(d.name).trim().toLowerCase()!==name){$("jo").disabled=false;e.textContent="No room matches that ID and name.";return}
+    const j=getJoined().filter(r=>r.id!==id);j.unshift({id,name:d.name});store.set(joinedKey(),JSON.stringify(j.slice(0,20)));
+    openRoom(id);
+  }catch(x){$("jo").disabled=false;e.textContent="Couldn’t join the room."}
+}
+
+function openRoom(id){
+  cleanup();room=null;
+  app.innerHTML=`<div class="top"><button id="bk">← Back</button><button id="lo">Log out</button></div>
+  <div class="card big" style="margin-top:14px"><div id="meta" class="mute">Loading…</div><div id="prog"></div></div>
+  <div id="add"></div><div class="card" id="list"></div><div id="del"></div>`;
+  confirmDel=false;
+  $("bk").onclick=home;$("lo").onclick=logout;
+  unsub=db.doc("rooms/"+id).onSnapshot(s=>{
+    if(!s.exists){$("meta").textContent="This room no longer exists.";return}
+    room={id,...s.data()};drawRoom();
+  },e=>{$("meta").textContent="Couldn’t load this room."});
+}
+
+function drawRoom(){
+  if(!$("meta"))return;
+  const own=room.owner===me,t=room.todos||[];
+  $("meta").innerHTML=`<div style="font-size:20px;font-weight:700;color:var(--ink)">${esc(room.name)}</div>
+   <div style="margin:6px 0">Room ID <span class="chip">${esc(room.id)}</span></div>
+   <div>${own?"Your room — share the ID and name with friends":"Owner: "+esc(room.owner)+" · view only"}</div>`;
+  $("prog").innerHTML=progressHTML(t);
+  drawDel(own);
+  if(own&&!$("ti")){
+    $("add").innerHTML=`<div class="card"><div class="row"><input id="ti" maxlength="120" placeholder="Add a task…"><button class="p" id="ta">Add</button></div></div>`;
+    $("ta").onclick=addTodo;$("ti").onkeydown=e=>{if(e.key==="Enter")addTodo()};
+  }
+  $("list").innerHTML=t.length?t.map(x=>`<div class="todo ${x.done?"done":""}"><button class="chk" data-t="${esc(x.id)}" ${own?"":"disabled"} aria-label="Toggle">${x.done?"✓":""}</button><span class="t">${esc(x.text)}</span>${own?`<button class="x" data-d="${esc(x.id)}" aria-label="Delete">✕</button>`:""}</div>`).join(""):`<div class="empty">No tasks yet.</div>`;
+  $("list").querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>save(room.todos.map(x=>x.id===b.dataset.t?{...x,done:!x.done}:x)));
+  $("list").querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>save(room.todos.filter(x=>x.id!==b.dataset.d)));
+}
+function addTodo(){
+  const i=$("ti"),v=i.value.trim();if(!v)return;i.value="";
+  save([...(room.todos||[]),{id:rnd(8,"abcdefghijklmnopqrstuvwxyz0123456789"),text:v,done:false}]);
+}
+let confirmDel=false;
+function drawDel(own){
+  const el=$("del");if(!el)return;
+  if(!own){el.innerHTML="";return}
+  el.innerHTML=confirmDel
+    ?`<div class="mute" style="margin-bottom:8px">Delete “${esc(room.name)}” for everyone? This can’t be undone.</div><div class="row"><button class="danger p" id="dy">Yes, delete</button><button id="dn">Cancel</button></div>`
+    :`<button class="danger" id="dr">Delete room</button>`;
+  if(confirmDel){$("dy").onclick=deleteRoom;$("dn").onclick=()=>{confirmDel=false;drawDel(true)}}
+  else $("dr").onclick=()=>{confirmDel=true;drawDel(true)};
+}
+async function deleteRoom(){
+  if(!room||room.owner!==me)return;
+  const id=room.id;$("dy").disabled=true;
+  try{cleanup();await db.doc("rooms/"+id).delete();home()}
+  catch(e){confirmDel=false;openRoom(id);setTimeout(()=>{const m=$("meta");if(m)m.insertAdjacentHTML("beforeend",`<div class="err">Couldn’t delete the room.</div>`)},600)}
+}
+async function save(todos){
+  if(room.owner!==me)return;
+  try{await db.doc("rooms/"+room.id).update({todos})}catch(e){$("meta").insertAdjacentHTML("beforeend",`<div class="err">Couldn’t save — check your connection.</div>`)}
+}
+
+// ---------- offline storage (used when not running inside Claude) ----------
+function localDb(){
+ const K="localdb:",subs=[];
+ const rd=p=>{try{return JSON.parse(localStorage.getItem(K+p))}catch(e){return null}};
+ const wr=(p,d)=>{if(d===null)localStorage.removeItem(K+p);else localStorage.setItem(K+p,JSON.stringify(d));subs.slice().forEach(f=>f())};
+ const snap=p=>({id:p.split("/").pop(),exists:rd(p)!==null,data:()=>rd(p)||undefined});
+ return{doc:p=>({get:async()=>snap(p),set:async d=>wr(p,d),update:async d=>wr(p,{...rd(p),...d}),delete:async()=>wr(p,null),
+  onSnapshot(n){const f=()=>n(snap(p));subs.push(f);f();return()=>{subs.splice(subs.indexOf(f),1)}}}),
+  collection:c=>({where:(f,o,v)=>({onSnapshot(n){const pre=K+c+"/";const q=()=>{const docs=Object.keys(localStorage).filter(k=>k.startsWith(pre)&&k.slice(pre.length).indexOf("/")<0).map(k=>snap(k.slice(K.length))).filter(s=>s.data()[f]===v);n({docs,empty:!docs.length,size:docs.length})};subs.push(q);q();return()=>{subs.splice(subs.indexOf(q),1)}}})})};
+}
+
+// ---------- boot ----------
+authView();
+(async()=>{
+  try{
+    if(window.claude){db=await Promise.race([claude.use("db"),new Promise(r=>setTimeout(()=>r(null),10000))])}
+  }catch(e){db=null}
+  if(!db)db=localDb();
+  const s=store.get("session");
+  if(s){try{const a=await db.doc("accounts/"+s).get();if(a.exists){me=s;return home()}}catch(e){}}
+  authView();
+})();
+</script>
+</body>
+</html>
